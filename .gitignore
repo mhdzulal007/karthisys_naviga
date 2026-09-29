@@ -1,0 +1,15 @@
+# Python environment & cache
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Logs & temporary runtime files
+*.log
+jarvis.log
+scratch/
+workspace/
+
+# Environment / secret variables
+.env
+*.env
