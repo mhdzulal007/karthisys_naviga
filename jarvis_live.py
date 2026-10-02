@@ -100,37 +100,36 @@ DEFAULT_SYSTEM_PROMPT = """
 You are JARVIS, an elite personal AI assistant to Tony Stark.
 Persona & Capability Guidelines:
 - Unfailingly calm, refined British cadence, polite, dry wit. Address the user as 'Sir'.
+- REAL-TIME 2026 KNOWLEDGE & FACTS: You are operating in 2026 with full up-to-date real-time intelligence.
 - ULTRA-FAST & FLUID RESPONSES: Keep answers extremely concise, crisp, and direct (1 short sentence when possible, 2 sentences maximum).
 - Begin speaking immediately without introductory filler, fluff, or pleasantries.
 - FULL WINDOWS OS AUTHORITY: You possess real-time tools to control the host computer (`launch_app`, `close_app`, `play_spotify`, `control_volume`, `run_cmd`, `open_url`, `take_desktop_screenshot`, `get_system_info`).
 - CRITICAL DIRECTIVE: NEVER say you are "just a language model" or that you cannot control the computer. You have active function tools for full PC automation. Whenever asked to open or close apps, play music, change volume, open websites, or execute commands, ALWAYS call the corresponding tool function immediately!
+- BARGE-IN DIRECTIVE: If the user interrupts or speaks while you are talking, immediately yield and answer their new query.
 - If told to go to sleep or stand down, give a brief 3-word acknowledgement (e.g. "As you wish, sir.") before falling silent.
 """
-
-
-
 
 
 @dataclass
 class Config:
     api_key: str
 
-    model_name: str = "gemini-3.1-flash-live-preview"
+    model_name: str = "gemini-3.8-live"
     voice_name: str = "Charon"
 
     channels: int = 1
     sample_rate_in: int = 16000
     sample_rate_out: int = 24000
     block_size: int = 512
-    playback_prebuffer_blocks: int = 2
+    playback_prebuffer_blocks: int = 1
 
     wake_score_threshold: float = 0.5
-    wake_echo_guard_s: float = 0.2
+    wake_echo_guard_s: float = 0.15
 
     start_of_speech_sensitivity: str = "HIGH"
     end_of_speech_sensitivity: str = "HIGH"
-    prefix_padding_ms: int = 20
-    silence_duration_ms: int = 200
+    prefix_padding_ms: int = 10
+    silence_duration_ms: int = 120
 
     inactivity_sleep_s: int = 90
     sleep_phrases: List[str] = field(default_factory=lambda: list(DEFAULT_SLEEP_PHRASES))
@@ -557,22 +556,21 @@ async def audio_input_loop(
                     continue
 
                 # AWAKE: stream mic audio to Gemini.
-                # 1. Echo Gate: Prevent JARVIS from hearing his own voice coming out of the speakers.
-                if playback.is_playing or (time.time() - playback.last_playback_time) < 0.15:
-                    await asyncio.sleep(0.005)
-                    continue
-
-                # 2. Adaptive VAD Noise Gate: Filter out static background noise / fan hiss
-                # so Gemini only receives audio when you are actually speaking into the mic.
+                # 1. Adaptive VAD Noise Gate: Filter out static background noise / fan hiss
                 rms = float(np.sqrt(np.mean(indata.astype(np.float32) ** 2)))
                 if not hasattr(audio_input_loop, "_noise_floor"):
-                    audio_input_loop._noise_floor = 3000.0
-                audio_input_loop._noise_floor = 0.95 * audio_input_loop._noise_floor + 0.05 * min(rms, 4000.0)
+                    audio_input_loop._noise_floor = 1200.0
+                audio_input_loop._noise_floor = 0.95 * audio_input_loop._noise_floor + 0.05 * min(rms, 2500.0)
 
-                vad_threshold = max(2800.0, audio_input_loop._noise_floor * 1.15)
+                vad_threshold = max(1500.0, audio_input_loop._noise_floor * 1.1)
                 if rms < vad_threshold:
                     await asyncio.sleep(0.005)
                     continue
+
+                # 2. Barge-in Interruption: If user speaks while Jarvis is vocalizing, halt audio immediately!
+                if playback.is_playing:
+                    playback.interrupt()
+                    log.info("[Barge-in] User interrupted Jarvis speech - cutoff active.")
 
                 await session.send_realtime_input(
                     audio=types.Blob(
